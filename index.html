@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINEスタンプ リサイズツール for AI Art</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Cropper.js -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <style>
+        .checkerboard {
+            background-color: #f0f0f0;
+            background-image:
+                linear-gradient(45deg, #ddd 25%, transparent 25%),
+                linear-gradient(-45deg, #ddd 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ddd 75%),
+                linear-gradient(-45deg, transparent 75%, #ddd 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        /* Cropper custom styles to ensure visibility in modal */
+        .img-container {
+            max-height: 60vh;
+        }
+        .img-container img {
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-[#06c755] text-white p-4 shadow-md">
+        <div class="container mx-auto max-w-5xl flex items-center gap-3">
+            <i class="fa-regular fa-face-smile text-2xl"></i>
+            <h1 class="text-xl font-bold">LINEスタンプ リサイズツール</h1>
+        </div>
+    </header>
+
+    <main class="container mx-auto max-w-5xl p-4 md:p-8">
+        
+        <!-- Intro -->
+        <div class="bg-white rounded-xl shadow-sm p-6 mb-8 border border-slate-200">
+            <p class="text-slate-600 mb-4">
+                生成AIなどで作成した画像をアップロード・トリミングすると、LINEスタンプの申請に必要な3つのサイズ（メイン・タブ・スタンプ本体）に合わせて自動的にリサイズ・配置します。
+            </p>
+            <div class="flex flex-col md:flex-row gap-6 items-start">
+                <!-- Upload Area -->
+                <div class="w-full md:w-1/2">
+                    <label for="fileInput" class="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-[#06c755] rounded-lg cursor-pointer bg-green-50 hover:bg-green-100 transition-colors">
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                            <i class="fa-solid fa-crop-simple text-3xl text-[#06c755] mb-3"></i>
+                            <p class="mb-2 text-sm text-slate-600"><span class="font-semibold">画像を選択してトリミング</span></p>
+                            <p class="text-xs text-slate-500">PNG, JPG (透過PNG推奨)</p>
+                        </div>
+                        <input id="fileInput" type="file" class="hidden" accept="image/png, image/jpeg" />
+                    </label>
+                </div>
+
+                <!-- Controls -->
+                <div class="w-full md:w-1/2 space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">
+                            画像サイズ調整（余白率）: <span id="paddingVal">10</span>%
+                        </label>
+                        <input id="paddingRange" type="range" min="0" max="40" value="10" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#06c755]">
+                        <p class="text-xs text-slate-500 mt-1">※スタンプが見切れないよう、適度な余白（10px程度）が推奨されています。</p>
+                    </div>
+                    
+                    <div id="originalPreviewArea" class="hidden items-center gap-4 p-3 bg-slate-100 rounded text-sm text-slate-600">
+                        <img id="originalPreview" class="w-12 h-12 object-contain border bg-white" src="" alt="">
+                        <span>オリジナル(加工後): <span id="originalDims">-</span> px</span>
+                    </div>
+                    
+                    <!-- Re-crop button (visible only after processing) -->
+                    <button id="reCropBtn" class="hidden text-sm text-[#06c755] border border-[#06c755] px-3 py-1 rounded hover:bg-green-50">
+                        <i class="fa-solid fa-rotate-left"></i> もう一度トリミングする
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output Section -->
+        <div id="outputSection" class="hidden">
+            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-wand-magic-sparkles text-[#06c755]"></i> 変換結果
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                <!-- Main Image Card -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div class="bg-slate-50 p-2 text-center border-b text-sm font-bold text-slate-700">メイン画像 (main)</div>
+                    <div class="p-4 flex-grow flex flex-col items-center justify-center bg-slate-100">
+                        <div class="checkerboard border border-slate-300 shadow-sm relative">
+                            <!-- Canvas is hidden, img shows the result -->
+                            <canvas id="canvasMain" width="240" height="240" class="hidden"></canvas>
+                            <img id="imgMain" class="w-[240px] h-[240px] object-contain max-w-full" alt="Main Preview">
+                            <span class="absolute bottom-0 right-0 bg-black/50 text-white text-[10px] px-1">240x240</span>
+                        </div>
+                    </div>
+                    <div class="p-3 border-t bg-slate-50">
+                        <button onclick="downloadImage('imgMain', 'main.png')" class="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded text-sm transition-colors flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-download"></i> ダウンロード
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab Image Card -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div class="bg-slate-50 p-2 text-center border-b text-sm font-bold text-slate-700">タブ画像 (tab)</div>
+                    <div class="p-4 flex-grow flex flex-col items-center justify-center bg-slate-100">
+                        <div class="checkerboard border border-slate-300 shadow-sm relative">
+                            <canvas id="canvasTab" width="96" height="74" class="hidden"></canvas>
+                            <img id="imgTab" class="w-[96px] h-[74px] object-contain max-w-full" alt="Tab Preview">
+                            <span class="absolute bottom-0 right-0 bg-black/50 text-white text-[10px] px-1">96x74</span>
+                        </div>
+                    </div>
+                    <div class="p-3 border-t bg-slate-50">
+                        <button onclick="downloadImage('imgTab', 'tab.png')" class="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded text-sm transition-colors flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-download"></i> ダウンロード
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sticker Image Card -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div class="bg-slate-50 p-2 text-center border-b text-sm font-bold text-slate-700">スタンプ画像 (01〜40)</div>
+                    <div class="p-4 flex-grow flex flex-col items-center justify-center bg-slate-100">
+                        <!-- Sticker canvas usually variable, but we use max size box for consistency -->
+                        <div class="checkerboard border border-slate-300 shadow-sm relative">
+                            <canvas id="canvasSticker" width="370" height="320" class="hidden"></canvas>
+                            <img id="imgSticker" class="w-[185px] h-[160px] md:w-[240px] md:h-[208px] object-contain max-w-full" alt="Sticker Preview">
+                            <span class="absolute bottom-0 right-0 bg-black/50 text-white text-[10px] px-1">370x320(Max)</span>
+                        </div>
+                    </div>
+                    <div class="p-3 border-t bg-slate-50">
+                        <button onclick="downloadImage('imgSticker', 'sticker_01.png')" class="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 px-4 rounded text-sm transition-colors flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-download"></i> ダウンロード
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Guidelines -->
+        <div class="mt-12 bg-amber-50 border border-amber-200 rounded-xl p-6">
+            <h3 class="text-amber-800 font-bold mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-circle-exclamation"></i>
+                制作・審査の注意点 (LINE Creators Market)
+            </h3>
+            <ul class="list-disc list-inside space-y-2 text-sm text-amber-900">
+                <li><strong>フォーマット:</strong> 全てPNG形式である必要があります。このツールは自動的にPNGを出力します。</li>
+                <li><strong>透過処理:</strong> 背景は透過させる必要があります。生成AIの出力が矩形（背景あり）の場合は、別途背景削除ツールで背景を透明にしてからここにアップロードしてください。</li>
+                <li><strong>余白:</strong> スタンプ画像の上下左右には、10px程度の余白が推奨されています（トークルームの吹き出しとのバランスのため）。</li>
+                <li><strong>偶数サイズ:</strong> 画像の幅・高さは「偶数」であることが望ましいとされています（リサイズ時に奇数になると滲む可能性があります）。</li>
+                <li><strong>権利関係:</strong> AI生成物を使用する場合、AIサービスの規約を確認し、商用利用が可能か、他者の著作権を侵害していないか十分に確認してください。</li>
+                <li><strong>サイズ制限:</strong> 自動圧縮されますが、スタンプ1個あたり1MB以下である必要があります。</li>
+            </ul>
+        </div>
+
+    </main>
+
+    <!-- Crop Modal -->
+    <div id="cropModal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-slate-700"><i class="fa-solid fa-crop-simple mr-2"></i>画像のトリミング</h3>
+                <button onclick="closeCropModal()" class="text-slate-400 hover:text-slate-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-4 bg-slate-900 flex-grow flex items-center justify-center overflow-hidden">
+                <div class="img-container">
+                    <img id="imageToCrop" src="" alt="Crop Preview" class="max-w-full">
+                </div>
+            </div>
+
+            <div class="p-4 border-t bg-slate-50 flex justify-end gap-3">
+                <button onclick="closeCropModal()" class="px-4 py-2 rounded text-slate-600 hover:bg-slate-200 transition-colors">
+                    キャンセル
+                </button>
+                <button onclick="applyCrop()" class="px-6 py-2 rounded bg-[#06c755] text-white hover:bg-green-600 transition-colors shadow-sm font-bold">
+                    <i class="fa-solid fa-check mr-2"></i>適用して作成
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const paddingRange = document.getElementById('paddingRange');
+        const paddingValDisplay = document.getElementById('paddingVal');
+        const outputSection = document.getElementById('outputSection');
+        const originalPreview = document.getElementById('originalPreview');
+        const originalDims = document.getElementById('originalDims');
+        const originalPreviewArea = document.getElementById('originalPreviewArea');
+        const reCropBtn = document.getElementById('reCropBtn');
+        
+        // Crop Modal Elements
+        const cropModal = document.getElementById('cropModal');
+        const imageToCrop = document.getElementById('imageToCrop');
+
+        let currentImage = null; // Stores the final cropped image object
+        let originalFileUrl = null; // Stores the raw uploaded file URL for re-cropping
+        let cropper = null;
+
+        // Configuration for output types
+        const CONFIG = {
+            main: { w: 240, h: 240, id: 'canvasMain', imgId: 'imgMain' },
+            tab:  { w: 96,  h: 74,  id: 'canvasTab',  imgId: 'imgTab' },
+            sticker: { w: 370, h: 320, id: 'canvasSticker', imgId: 'imgSticker' }
+        };
+
+        fileInput.addEventListener('change', handleFileSelect);
+        
+        // Re-crop button handler
+        reCropBtn.addEventListener('click', () => {
+            if (originalFileUrl) {
+                openCropModal(originalFileUrl);
+            }
+        });
+
+        paddingRange.addEventListener('input', (e) => {
+            paddingValDisplay.textContent = e.target.value;
+            if(currentImage) processImages();
+        });
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Reset file input so same file can be selected again if needed
+            // e.target.value = ''; 
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                originalFileUrl = event.target.result;
+                openCropModal(originalFileUrl);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function openCropModal(url) {
+            imageToCrop.src = url;
+            cropModal.classList.remove('hidden');
+            
+            // Destroy existing cropper if any
+            if (cropper) {
+                cropper.destroy();
+            }
+
+            // Initialize Cropper.js
+            cropper = new Cropper(imageToCrop, {
+                viewMode: 1,
+                dragMode: 'move',
+                autoCropArea: 0.9,
+                restore: false,
+                guides: true,
+                center: true,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+                toggleDragModeOnDblclick: false,
+                background: false, // Transparent background check
+            });
+        }
+
+        function closeCropModal() {
+            cropModal.classList.add('hidden');
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            // Clear file input to allow re-selecting same file if cancelled
+            fileInput.value = '';
+        }
+
+        function applyCrop() {
+            if (!cropper) return;
+
+            // Get cropped canvas
+            const canvas = cropper.getCroppedCanvas({
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+            });
+
+            // Convert to image object for processing
+            const croppedUrl = canvas.toDataURL('image/png');
+            const img = new Image();
+            img.onload = () => {
+                currentImage = img;
+                
+                // Show processed original info
+                originalPreview.src = img.src;
+                originalDims.textContent = `${img.width} x ${img.height}`;
+                originalPreviewArea.classList.remove('hidden');
+                originalPreviewArea.classList.add('flex');
+                
+                // Show output and re-crop button
+                outputSection.classList.remove('hidden');
+                reCropBtn.classList.remove('hidden');
+                
+                processImages();
+                closeCropModal();
+            };
+            img.src = croppedUrl;
+        }
+
+        function processImages() {
+            if (!currentImage) return;
+
+            const paddingPercent = parseInt(paddingRange.value, 10);
+
+            // Process each type
+            Object.keys(CONFIG).forEach(type => {
+                const conf = CONFIG[type];
+                const canvas = document.getElementById(conf.id);
+                const ctx = canvas.getContext('2d');
+                const imgElement = document.getElementById(conf.imgId);
+
+                // Clear canvas
+                ctx.clearRect(0, 0, conf.w, conf.h);
+
+                // Calculate dimensions to fit within canvas (Contain)
+                // Apply padding logic: Effective canvas size is reduced by padding
+                const pFactor = 1 - (paddingPercent / 100); 
+                const maxDrawW = conf.w * pFactor;
+                const maxDrawH = conf.h * pFactor;
+
+                const scale = Math.min(maxDrawW / currentImage.width, maxDrawH / currentImage.height);
+                
+                const drawW = currentImage.width * scale;
+                const drawH = currentImage.height * scale;
+
+                // Center the image
+                const x = (conf.w - drawW) / 2;
+                const y = (conf.h - drawH) / 2;
+
+                // High quality scaling
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                ctx.drawImage(currentImage, x, y, drawW, drawH);
+
+                // Export to PNG
+                const dataUrl = canvas.toDataURL('image/png');
+                imgElement.src = dataUrl;
+            });
+        }
+
+        function downloadImage(imgId, filename) {
+            const img = document.getElementById(imgId);
+            if (!img.src || img.src === "") return;
+
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = img.src;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
